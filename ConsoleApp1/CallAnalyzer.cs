@@ -3,7 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
 
-internal sealed class CallAnalyzer(Solution solution, HierarchyReport report, AnalyzerOptions options)
+internal sealed class CallAnalyzer(Solution solution, HierarchyReport report, MermaidReport diagram, AnalyzerOptions options)
 {
     public async Task WriteAsync(IMethodSymbol root, CancellationToken token)
     {
@@ -14,8 +14,8 @@ internal sealed class CallAnalyzer(Solution solution, HierarchyReport report, An
         var collector = new CallCollector(solution, token);
 
         // An explicit stack supports deep call chains and recursive methods.
-        var pending = new Stack<(IMethodSymbol Method, int Depth, string Note)>();
-        pending.Push((root, 0, "root"));
+        var pending = new Stack<(IMethodSymbol Method, int Depth, string Note, int ParentId)>();
+        pending.Push((root, 0, "root", 0));
 
         while (pending.TryPop(out var entry))
         {
@@ -34,6 +34,7 @@ internal sealed class CallAnalyzer(Solution solution, HierarchyReport report, An
             if (visited.TryGetValue(key, out var previous))
             {
                 await report.WriteMethodAsync(method, project, entry.Depth, previous, true, entry.Note);
+                await diagram.WriteRepeatEdgeAsync(entry.ParentId, previous, entry.Note);
                 continue;
             }
 
@@ -41,12 +42,14 @@ internal sealed class CallAnalyzer(Solution solution, HierarchyReport report, An
             if (options.MaxDepth is { } limit && entry.Depth >= limit && project != null)
             {
                 await report.WriteDepthLimitedAsync(method, project, entry.Depth, entry.Note);
+                await diagram.WriteDepthLimitedAsync(method, entry.ParentId, entry.Note);
                 continue;
             }
 
             var id = visited.Count + 1;
             visited.Add(key, id);
             await report.WriteMethodAsync(method, project, entry.Depth, id, false, entry.Note);
+            await diagram.WriteNodeAsync(method, id, entry.ParentId, entry.Note);
 
             if (visited.Count % 100 == 0)
                 Console.WriteLine($"Analyzed {visited.Count} methods...");
@@ -55,7 +58,7 @@ internal sealed class CallAnalyzer(Solution solution, HierarchyReport report, An
 
             // Reverse the push order so the report keeps source traversal order.
             for (var index = calls.Count - 1; index >= 0; index--)
-                pending.Push((calls[index].Method, entry.Depth + 1, calls[index].Note));
+                pending.Push((calls[index].Method, entry.Depth + 1, calls[index].Note, id));
         }
 
         await report.WriteTotalAsync(visited.Count, omittedExternal.Count);

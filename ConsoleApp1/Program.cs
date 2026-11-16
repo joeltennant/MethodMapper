@@ -11,6 +11,7 @@ Console.CancelKeyPress += (_, eventArgs) =>
 };
 
 string? temporaryPath = null;
+string? diagramTemporaryPath = null;
 try
 {
     if (AnalyzerOptions.IsHelpRequest(args))
@@ -41,19 +42,28 @@ try
     // never replaces an earlier report with a truncated one.
     Directory.CreateDirectory(Path.GetDirectoryName(options.OutputPath)!);
     temporaryPath = options.OutputPath + ".tmp";
+    var diagramPath = Path.ChangeExtension(options.OutputPath, ".md");
+    diagramTemporaryPath = diagramPath + ".tmp";
     using (var writer = new StreamWriter(temporaryPath, false))
+    using (var diagramWriter = new StreamWriter(diagramTemporaryPath, false))
     {
         var report = new HierarchyReport(writer);
+        var diagram = new MermaidReport(diagramWriter);
         await report.WriteHeaderAsync(options);
+        await diagram.WriteStartAsync(options);
         await report.WriteWorkspaceDiagnosticsAsync(workspace.Diagnostics);
 
-        var analyzer = new CallAnalyzer(solution, report, options);
+        var analyzer = new CallAnalyzer(solution, report, diagram, options);
         await analyzer.WriteAsync(root, token);
+        await diagram.WriteEndAsync();
     }
 
     File.Move(temporaryPath, options.OutputPath, overwrite: true);
     temporaryPath = null;
+    File.Move(diagramTemporaryPath, diagramPath, overwrite: true);
+    diagramTemporaryPath = null;
     Console.WriteLine($"Report written to {options.OutputPath}");
+    Console.WriteLine($"Mermaid diagram written to {diagramPath}");
     return 0;
 }
 catch (OperationCanceledException)
@@ -72,4 +82,6 @@ finally
 {
     if (temporaryPath != null && File.Exists(temporaryPath))
         File.Delete(temporaryPath);
+    if (diagramTemporaryPath != null && File.Exists(diagramTemporaryPath))
+        File.Delete(diagramTemporaryPath);
 }

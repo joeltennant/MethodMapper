@@ -217,7 +217,12 @@ internal sealed class CallCollector(Solution solution, CancellationToken token)
                 ? await SymbolFinder.FindImplementationsAsync(method, solution, cancellationToken: token)
                 : await SymbolFinder.FindOverridesAsync(method, solution, cancellationToken: token);
 
-            targets = symbols.OfType<IMethodSymbol>().ToArray();
+            // Symbol search order varies between runs; sort so numbering and output are repeatable.
+            targets = symbols.OfType<IMethodSymbol>()
+                .OrderBy(target => target.ToDisplayString(), StringComparer.Ordinal)
+                .ThenBy(target => target.Locations.FirstOrDefault()?.GetLineSpan().Path, StringComparer.Ordinal)
+                .ThenBy(target => target.Locations.FirstOrDefault()?.SourceSpan.Start)
+                .ToArray();
             dispatchCache.Add(method, targets);
         }
 
